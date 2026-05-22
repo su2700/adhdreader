@@ -162,5 +162,21 @@ if raw_text:
                 processed_text = apply_bionic_reading(processed_text)
             
             st.markdown(processed_text)
+
+            st.divider()
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                # Streamlit's st.code has a built-in copy button
+                st.info("Copy the text below using the icon in the top right:")
+                st.code(processed_text, language=None)
+            
+            with col2:
+                st.download_button(
+                    label="📥 Download as Text File",
+                    data=processed_text,
+                    file_name=f"adhd_reader_{target_lang.lower()}.txt",
+                    mime="text/plain"
+                )
 else:
     st.info("Provide some content above and click 'Process Content' to begin.")
