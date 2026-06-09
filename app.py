@@ -7,6 +7,8 @@ import io
 import os
 from dotenv import load_dotenv
 import re
+from fpdf import FPDF
+import markdown
 
 # Load environment variables
 load_dotenv()
@@ -93,6 +95,52 @@ def process_with_ai(text, target_language, model_name, adhd_friendly=True):
     except Exception as e:
         return f"Error during AI processing: {e}. Try selecting a different model (e.g., gemini-pro) in the sidebar."
 
+def generate_pdf(markdown_text):
+    """Generates a PDF from markdown text with Unicode and Bold support."""
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Paths to Microsoft YaHei (Regular and Bold) for Unicode support
+        font_path = "C:\\Windows\\Fonts\\msyh.ttc"
+        font_bold_path = "C:\\Windows\\Fonts\\msyhbd.ttc"
+        
+        # Load fonts if they exist to support bolding and international characters
+        if os.path.exists(font_path):
+            pdf.add_font("UnicodeFont", "", font_path)
+            if os.path.exists(font_bold_path):
+                # Loading the bold version allows <strong> and <b> tags to work in write_html
+                pdf.add_font("UnicodeFont", "B", font_bold_path)
+            pdf.set_font("UnicodeFont", size=12)
+        else:
+            # Fallback to standard Helvetica if Windows fonts aren't found
+            pdf.set_font("helvetica", size=12)
+        
+        # Convert markdown to HTML (handles bolding, lists, headers)
+        html_content = markdown.markdown(markdown_text)
+        
+        # Primary path: Render HTML to PDF
+        try:
+            pdf.write_html(html_content)
+        except Exception:
+            # Fallback: Strip ALL markdown symbols and use multi_cell to ensure no raw markdown is seen
+            # This regex removes #, *, _, `, and [links](url) formatting
+            clean_text = re.sub(r'[*_#~`]|\[.*?\]\(.*?\)', '', markdown_text)
+            pdf.multi_cell(0, 10, txt=clean_text)
+            
+        return bytes(pdf.output())
+    except Exception as e:
+        # Ultimate safety fallback
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("helvetica", size=12)
+        # Final attempt to at least provide the text without crashing
+        clean_text = re.sub(r'[*_#~`]', '', markdown_text)
+        # Encode to latin-1 to avoid fpdf crashes on unicode in this extreme fallback
+        safe_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
+        pdf.multi_cell(0, 10, txt=safe_text)
+        return bytes(pdf.output())
+
 def get_available_models():
     """Fetches available models that support generateContent."""
     try:
@@ -137,6 +185,10 @@ with st.sidebar:
 # Main Area
 raw_text = ""
 
+# Initialize session state for processed text
+if "processed_text" not in st.session_state:
+    st.session_state.processed_text = ""
+
 if input_type == "Text":
     raw_text = st.text_area("Paste your text here:", height=300)
 elif input_type == "URL":
@@ -155,28 +207,43 @@ if raw_text:
         with st.spinner(f"AI ({model_choice}) is working its magic..."):
             processed_text = process_with_ai(raw_text, target_lang, model_choice)
             
-            st.divider()
-            st.subheader("Processed Content")
-            
             if bionic_enabled:
                 processed_text = apply_bionic_reading(processed_text)
             
-            st.markdown(processed_text)
+            st.session_state.processed_text = processed_text
 
-            st.divider()
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Streamlit's st.code has a built-in copy button
-                st.info("Copy the text below using the icon in the top right:")
-                st.code(processed_text, language=None)
-            
-            with col2:
-                st.download_button(
-                    label="📥 Download as Text File",
-                    data=processed_text,
-                    file_name=f"adhd_reader_{target_lang.lower()}.txt",
-                    mime="text/plain"
-                )
+if st.session_state.processed_text:
+    st.divider()
+    st.subheader("Processed Content")
+    st.markdown(st.session_state.processed_text)
+
+    st.divider()
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        # Streamlit's st.code has a built-in copy button
+        st.info("Copy the text below using the icon in the top right:")
+        st.code(st.session_state.processed_text, language=None)
+    
+    with col2:
+        st.download_button(
+            label="📥 Download as Text File",
+            data=st.session_state.processed_text,
+            file_name=f"adhd_reader_{target_lang.lower()}.txt",
+            mime="text/plain"
+        )
+        
+        try:
+            pdf_data = generate_pdf(st.session_state.processed_text)
+            st.download_button(
+                label="📄 Download as PDF",
+                data=pdf_data,
+                file_name=f"adhd_reader_{target_lang.lower()}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error(f"Error generating PDF: {e}")
+            st.info("Try downloading as a text file instead if the PDF fails.")
 else:
-    st.info("Provide some content above and click 'Process Content' to begin.")
+    if not raw_text:
+        st.info("Provide some content above and click 'Process Content' to begin.")
